@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#000000">
+<title>2026 尾牙抽獎系統</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+<script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vue@3.4.38/dist/vue.global.prod.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Noto+Sans+TC:wght@400;700;900&display=swap');
+:root{--blue:#2f6bff;--blue-t:#7aa2ff;--muted:#b8b8b8;--rule:rgba(255,255,255,.55)}
+[v-cloak]{display:none}
+*{border-radius:0!important;scrollbar-width:thin;scrollbar-color:#555 #000}
+body{font-family:'Space Grotesk','Noto Sans TC',sans-serif;background:#000;color:#fff;overflow-x:hidden;font-variant-numeric:tabular-nums}
+h1,h2,h3{letter-spacing:-.03em;font-weight:900;line-height:1.05}
+label{text-transform:uppercase;letter-spacing:.1em}
+.panel{background:#000;border:1px solid var(--rule);border-top:3px solid #fff;padding:1.5rem}
+.panel.click{cursor:pointer;transition:.15s}.panel.click:hover{border-color:var(--blue);background:#0a0f1f;transform:translateY(-3px)}
+.inp{width:100%;background:#000;color:#fff;border:1px solid var(--rule);padding:.75rem}
+.inp:focus{outline:2px solid var(--blue)}
+.btn{padding:.6rem 1rem;font-weight:700;font-size:.85rem;border:1px solid var(--rule);color:#fff;background:#000;transition:.15s}
+.btn:active{transform:scale(.98)}
+.btn-blue{background:var(--blue);border-color:var(--blue)}.btn-blue:hover{background:#fff;color:#000}
+.btn-red{border-color:#ff6b6b;color:#ff6b6b}.btn-red:hover{background:#ff6b6b;color:#000}
+.btn.on{background:var(--blue);border-color:var(--blue)}
+.muted{color:var(--muted)}.hint{color:var(--blue-t)}
+thead{background:#fff;color:#000}thead th{padding:1rem;font-size:.72rem;text-transform:uppercase;letter-spacing:.08em}
+td{padding:1rem}tbody tr{border-bottom:1px solid rgba(255,255,255,.18)}
+.empty{text-align:center;padding:1.5rem;color:#8a8a8a;font-size:.85rem}
+.tab{animation:fi .25s ease}@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.winner-card{background:#fff;color:#000;border-left:10px solid var(--blue);padding:1.75rem 1.5rem;min-width:280px;text-align:center;animation:pop .45s cubic-bezier(.2,.9,.3,1.2)}
+.winner-card .nm{font-size:3.4rem;font-weight:900;line-height:1.1}
+.winner-card .dp{color:var(--blue);font-weight:700;font-size:1.15rem}
+.winner-card .en{color:#555}
+@keyframes pop{from{opacity:0;transform:scale(.9) translateY(12px)}to{opacity:1;transform:none}}
+#toasts{position:fixed;top:1rem;left:50%;transform:translateX(-50%);z-index:100;display:flex;flex-direction:column;gap:.5rem;width:min(92vw,360px)}
+.toast{background:#000;border:2px solid var(--blue);padding:.85rem 1rem;font-weight:700;font-size:.9rem}.toast.err{border-color:#ff6b6b}
+.overlay{position:fixed;inset:0;z-index:60;background:#000;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.overlay img{width:100%;height:100%;object-fit:cover}
+.modal{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:1rem}
+.qrbox{display:flex;align-items:center;gap:.75rem;background:#fff;color:#000;padding:.75rem;border:2px solid var(--blue)}
+</style>
+</head>
+<body>
+<div id="app" v-cloak class="min-h-screen flex flex-col">
+
+<header class="sticky top-0 z-40 bg-black border-b-[3px] border-white px-4 py-3">
+  <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+    <div class="flex items-center gap-3 cursor-pointer" @click="switchTab('home')">
+      <div class="w-10 h-10 bg-[var(--blue)] flex items-center justify-center font-black text-xl">尾</div>
+      <div>
+        <h1 class="text-lg">{{ T('site') }}</h1>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="px-2 py-0.5 border font-bold" :class="online ? (ablyLive ? 'border-[var(--blue)] hint' : 'border-white') : 'border-red-400 text-red-400'">
+            <i class="fa-solid" :class="online ? (ablyLive ? 'fa-bolt' : 'fa-cloud') : 'fa-triangle-exclamation'"></i>
+            {{ online ? (ablyLive ? '即時同步' : '雲端同步') : '連線中斷' }}</span>
+          <span class="muted text-[10px]">Yuri</span>
+          <span v-if="S.envLabel" class="px-2 py-0.5 bg-white text-black font-bold">{{ S.envLabel }}</span>
+          <span v-if="S.settings.testMode" class="px-2 py-0.5 border border-orange-400 text-orange-300 font-bold">🧪 測試模式</span>
+        </div>
+      </div>
+    </div>
+    <nav class="flex items-center gap-1 overflow-x-auto text-sm">
+      <button v-for="n in navItems" :key="n[0]" class="btn" :class="{on: tab===n[0]}" @click="switchTab(n[0])">
+        <i :class="'fa-solid '+n[1]"></i> {{ n[2] }}</button>
+    </nav>
+  </div>
+</header>
+
+<main class="max-w-7xl w-full mx-auto p-4 sm:p-6 flex-grow" :class="{'!max-w-none': tab==='screen'}">
+
+<!-- 大廳 -->
+<section v-show="tab==='home'" class="tab space-y-8">
+  <div class="panel p-8 text-center space-y-6">
+    <h2 class="text-4xl sm:text-6xl">{{ T('home') }}<span class="block w-[88px] h-2 bg-[var(--blue)] mx-auto mt-5"></span></h2>
+    <p class="muted max-w-xl mx-auto text-sm">主持人用手機掃描下方 QR Code 進入遙控唱名介面（首次需輸入主持人密碼）：</p>
+    <div class="flex flex-col items-center gap-3">
+      <div class="bg-white p-4 border-4 border-[var(--blue)]"><div id="host-qrcode" class="w-[200px] h-[200px]"></div></div>
+      <span class="hint font-bold text-sm"><i class="fa-solid fa-qrcode"></i> 主持人手機掃此 Code 進入遙控端</span>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 pt-6 max-w-4xl mx-auto">
+      <div v-for="c in homeCards" :key="c[0]" class="panel click space-y-3" @click="switchTab(c[0])">
+        <i :class="'fa-solid text-4xl hint '+c[1]"></i><h3 class="text-lg">{{ c[2] }}</h3><p class="text-xs muted">{{ c[3] }}</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 遙控端 -->
+<section v-show="tab==='remote'" class="tab max-w-xl mx-auto">
+  <div class="panel space-y-6">
+    <h2 class="text-xl hint"><i class="fa-solid fa-gamepad"></i> {{ T('remote') }}</h2>
+    <div class="space-y-2">
+      <label class="block text-xs font-bold muted">大螢幕畫面切換（按抽獎會自動切到抽獎畫面）</label>
+      <div class="grid grid-cols-3 gap-2">
+        <button v-for="m in screenModes" :key="m[0]" class="btn" :class="{on: S.settings.screenMode===m[0]}" @click="setScreen(m[0])">{{ m[1] }}</button></div>
+    </div>
+    <div>
+      <label class="block text-xs font-bold muted mb-2">1. 選擇抽獎模式</label>
+      <div class="grid grid-cols-2 gap-3">
+        <button class="btn" :class="{on: drawType==='NORMAL'}" @click="drawType='NORMAL'">一般設定獎項</button>
+        <button class="btn" :class="{on: drawType==='EXTRA'}" @click="drawType='EXTRA'">現場加碼獎</button></div>
+    </div>
+    <div v-if="drawType==='NORMAL'" class="space-y-2">
+      <label class="block text-xs font-bold muted">2. 選擇抽獎獎項</label>
+      <select v-model="prizeId" class="inp font-bold">
+        <option v-for="p in S.prizes" :key="p.id" :value="p.id" :disabled="remaining(p)<=0">{{ p.prizeName }} (剩餘 {{ remaining(p) }}/{{ p.count }})</option></select>
+      <div class="text-xs muted flex justify-between">
+        <span>剩餘可抽名額：<strong :class="curRemaining>0?'text-white':'text-red-400'">{{ curRemaining }}</strong> 人</span>
+        <span>總設定人數：{{ curPrize ? curPrize.count : 0 }} 人</span></div>
+    </div>
+    <div v-else class="space-y-2">
+      <label class="block text-xs font-bold text-red-400">2. 自訂加碼內容</label>
+      <input v-model="extraTitle" class="inp" placeholder="例如：董事長加碼 10,000 元">
+    </div>
+    <div class="space-y-2">
+      <label class="block text-xs font-bold muted">3. 單次抽取人數</label>
+      <div class="flex items-center gap-3">
+        <input type="range" min="1" max="10" v-model.number="count" class="w-full" style="accent-color:var(--blue)">
+        <input type="number" min="1" max="10" v-model.number="count" class="inp !w-20 text-center font-bold text-lg"></div>
+    </div>
+    <button class="btn btn-blue w-full py-5 text-2xl font-black sticky bottom-4" :disabled="drawing" :class="{'opacity-50':drawing}" @click="triggerDraw">
+      <template v-if="drawing"><i class="fa-solid fa-spinner fa-spin"></i> 抽獎中...</template>
+      <template v-else-if="S.settings.testMode"><i class="fa-solid fa-flask"></i> 測試抽獎（不計入正式）</template>
+      <template v-else><i class="fa-solid fa-play"></i> 按下抽獎 (大螢幕同步)</template></button>
+    <div class="border-t border-white/30 pt-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm hint"><i class="fa-solid fa-microphone"></i> 該獎項已中獎名單 (唱名用)</h3>
+        <span class="text-xs border px-2 py-0.5 font-bold">共 {{ remoteList.length }} 人</span></div>
+      <div class="border border-white/20 p-4 max-h-60 overflow-y-auto space-y-2">
+        <div v-for="w in remoteList" :key="w.rowId" class="flex items-center justify-between border border-white/20 p-2.5">
+          <div><span class="text-xs hint font-bold mr-2">[{{ drawType==='EXTRA' ? w.prizeName : w.dept }}]</span>
+            <span class="font-black">{{ w.name }}</span>
+            <span class="text-xs muted ml-1">({{ drawType==='EXTRA' ? w.dept : w.english }})</span></div>
+          <span class="text-[10px] muted font-mono">{{ w.time }}</span></div>
+        <div v-if="!remoteList.length" class="empty"><i class="fa-regular fa-circle-user block text-2xl"></i>尚無得獎人員</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 大螢幕 -->
+<section v-show="tab==='screen'" class="tab" :style="{zoom: zoom}">
+  <div class="panel min-h-[550px] flex flex-col justify-between overflow-hidden">
+    <div class="text-center space-y-2">
+      <h3 class="text-3xl sm:text-5xl tracking-widest">{{ T('screen') }}</h3>
+      <p class="hint font-bold text-2xl">{{ scr.sub || '等待主持人觸發抽獎...' }}</p></div>
+    <div class="my-4 border-2 border-[var(--blue)] p-6 min-h-[300px] flex flex-wrap items-center justify-center gap-6">
+      <div v-if="scr.phase==='idle'" class="muted font-bold text-3xl tracking-widest"><i class="fa-solid fa-gift hint animate-bounce"></i> 遙控端連線就緒</div>
+      <div v-else-if="scr.phase==='spin'" class="text-center py-12 space-y-4">
+        <div class="text-7xl hint animate-spin"><i class="fa-solid fa-compact-disc"></i></div>
+        <div class="text-3xl font-black tracking-widest animate-pulse">正在為您開出幸運得主...</div></div>
+      <template v-else>
+        <div v-for="(w,i) in scr.list" :key="i" class="winner-card">
+          <div class="dp">{{ w.dept }}</div><div class="nm">{{ w.name }}</div><div class="en font-mono">{{ w.english }}</div></div></template>
+    </div>
+    <div class="flex flex-col sm:flex-row items-center justify-between border-t border-white/20 pt-4 gap-4">
+      <div class="text-xs muted">Yuri製 ‧ 雲端同步中</div>
+      <div class="flex gap-4">
+        <div class="qrbox"><div id="screen-qrcode" class="w-[130px] h-[130px]"></div><div><div class="font-black text-sm">同仁手機掃碼</div><div class="text-xs font-bold">查看中獎榜</div></div></div>
+        <div class="qrbox"><div id="screen-qrcode-p" class="w-[130px] h-[130px]"></div><div><div class="font-black text-sm">同仁手機掃碼</div><div class="text-xs font-bold">查看參加名單</div></div></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 參加名單 -->
+<section v-show="tab==='participants'" class="tab space-y-6">
+  <div class="panel"><h2 class="text-2xl"><i class="fa-solid fa-users mr-2"></i>{{ T('participants') }}</h2>
+    <p class="text-sm muted mt-1">共 <span class="hint font-bold">{{ S.participants.length }}</span> 人</p></div>
+  <div class="panel !p-0 overflow-x-auto">
+    <table class="w-full text-left text-sm">
+      <thead><tr><th>ID</th><th>公司</th><th>部門</th><th>姓名</th><th>英文名</th><th>狀態</th></tr></thead>
+      <tbody>
+        <tr v-for="p in S.participants" :key="p.id">
+          <td class="font-mono">{{ p.id }}</td><td>{{ p.company }}</td><td>{{ p.dept }}</td><td class="font-bold">{{ p.name }}</td><td class="muted">{{ p.english }}</td>
+          <td class="text-xs"><span v-if="!cats.get(p.id)" class="text-gray-500">未中獎</span>
+            <span v-else v-for="t in cats.get(p.id)" :key="t" class="hint mr-2">{{ t==='加碼獎' ? '加碼獎已中' : '正式獎已中' }}</span></td></tr>
+        <tr v-if="!S.participants.length"><td colspan="6" class="empty">尚無參加名單</td></tr>
+      </tbody></table></div>
+</section>
+
+<!-- 中獎榜 -->
+<section v-show="tab==='winners'" class="tab space-y-6">
+  <div class="panel flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div><h2 class="text-2xl"><i class="fa-solid fa-trophy mr-2"></i>{{ T('winners') }}</h2>
+      <p class="text-sm muted mt-1">已產生成果：<span class="hint font-bold">{{ official.length }}</span> 位得獎者</p></div>
+    <button class="btn btn-blue" @click="downloadWinnersXLSX"><i class="fa-solid fa-file-excel"></i> 匯出中獎名單 Excel</button></div>
+  <div v-for="g in winnerGroups" :key="g.title" class="space-y-3">
+    <h3 class="text-xl hint"><i class="fa-solid mr-2" :class="g.icon"></i>{{ g.title }} <span class="text-sm muted">({{ g.rows.length }} 人)</span></h3>
+    <div class="panel !p-0 overflow-x-auto">
+      <table class="w-full text-left text-sm">
+        <thead><tr><th>獎項名稱</th><th>部門</th><th>姓名</th><th>英文名</th><th>中獎時間</th></tr></thead>
+        <tbody>
+          <tr v-for="w in g.rows" :key="w.rowId">
+            <td class="font-bold hint">{{ w.prizeName }}<span v-if="isTest(w)"> 🧪</span></td><td>{{ w.dept }}</td>
+            <td class="font-black text-base">{{ w.name }}</td><td class="muted">{{ w.english }}</td><td class="font-mono text-xs muted">{{ w.time }}</td></tr>
+          <tr v-if="!g.rows.length"><td colspan="5" class="empty">尚無得獎者</td></tr>
+        </tbody></table></div>
+  </div>
+</section>
+
+<!-- 後台 -->
+<section v-show="tab==='admin'" class="tab space-y-8">
+  <div class="panel flex items-center justify-between">
+    <div><h2 class="text-2xl hint"><i class="fa-solid fa-sliders mr-2"></i>{{ T('admin') }}</h2><p class="text-sm muted mt-1">名單、獎項配額與棄權補位</p></div>
+    <button class="btn btn-red text-xs" @click="factoryReset"><i class="fa-solid fa-rotate"></i> 清空重置全系統</button></div>
+  <div class="flex flex-wrap gap-2">
+    <button v-for="p in adminPanes" :key="p[0]" class="btn" :class="{on: pane===p[0]}" @click="pane=p[0]">{{ p[1] }}</button></div>
+
+  <div v-show="pane==='import'" class="space-y-8">
+    <div class="p-3 text-sm font-bold border" :class="S.settings.testMode?'border-orange-400 text-orange-300':'border-white/20'">
+      {{ S.settings.testMode ? '🧪 目前為「測試模式」：匯入會寫入【測試資料表】' : '目前為「正式模式」：匯入會寫入【正式資料表】' }}</div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div v-for="k in ['participants','prizes']" :key="k" class="panel space-y-4">
+        <h3 class="text-lg hint"><i class="fa-solid mr-2" :class="k==='participants'?'fa-file-arrow-up':'fa-gifts'"></i>{{ k==='participants' ? '1. 匯入參與同仁 (Excel)' : '2. 匯入一般獎項 (Excel)' }}</h3>
+        <p class="text-xs muted">欄位：<code>{{ k==='participants' ? 'ID, 公司, 部門, 姓名, 英文' : 'ID, 獎項名稱, 數量' }}</code>（會覆蓋目前模式的資料）</p>
+        <input type="file" accept=".xlsx,.xls" class="block w-full text-xs muted" @change="files[k]=$event.target.files[0]">
+        <button class="btn btn-blue w-full" @click="processUpload(k)">{{ k==='participants' ? '匯入同仁名單' : '匯入獎項設定' }}</button>
+        <button class="btn w-full" @click="downloadTemplate(k)"><i class="fa-solid fa-download"></i> 下載範本 Excel</button></div>
+    </div>
+  </div>
+
+  <div v-show="pane==='stock'" class="space-y-8">
+    <div class="panel space-y-4"><h3 class="text-lg hint"><i class="fa-solid fa-database mr-2"></i>3. 獎項庫存監控</h3>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div v-for="p in S.prizes" :key="p.id" class="panel !p-4 flex justify-between items-center">
+          <div><div class="font-bold hint text-sm">{{ p.prizeName }}</div><div class="text-xs muted">總額度：{{ p.count }}</div></div>
+          <div class="text-right"><div class="text-xl font-black" :class="remaining(p)>0?'hint':'text-red-500'">{{ remaining(p) }}</div><div class="text-[10px] muted">剩餘可抽</div></div></div>
+        <div v-if="!S.prizes.length" class="empty">尚無獎項</div></div></div>
+    <div class="panel space-y-4"><h3 class="text-lg hint"><i class="fa-solid fa-user-slash mr-2"></i>4. 棄權與補位</h3>
+      <p class="text-xs muted">按「棄權」會標記該得獎者並自動為同獎項補抽 1 位（棄權者不會再被抽中）。</p>
+      <div class="space-y-2 max-h-96 overflow-y-auto">
+        <div v-for="w in S.winners" :key="w.rowId" class="flex items-center justify-between border border-white/20 p-3" :class="{'opacity-50': w.status==='棄權'}">
+          <div class="text-sm"><span class="hint font-bold">{{ w.prizeName }}<span v-if="isTest(w)"> 🧪</span></span> ‧ <span class="font-black">{{ w.name }}</span> <span class="text-xs muted">({{ w.dept }})</span></div>
+          <span v-if="w.status==='棄權'" class="text-xs text-red-400">已棄權</span>
+          <button v-else class="btn btn-red text-xs" @click="forfeit(w.rowId)">棄權並補位</button></div>
+        <div v-if="!S.winners.length" class="empty">尚無中獎紀錄</div></div></div>
+    <div class="panel space-y-4"><h3 class="text-lg hint"><i class="fa-solid fa-pen-to-square mr-2"></i>5. 加碼獎資料修正</h3>
+      <p class="text-xs muted">打錯名稱可直接修改；抽錯可刪除紀錄（該同仁之後可再被抽加碼獎）。</p>
+      <div class="space-y-2 max-h-96 overflow-y-auto">
+        <div v-for="w in extraWinners" :key="w.rowId" class="flex items-center justify-between gap-2 border border-white/20 p-3">
+          <div class="text-sm"><span class="hint font-bold">{{ w.prizeName }}</span> ‧ <span class="font-black">{{ w.name }}</span> <span class="text-xs muted">({{ w.dept }})</span></div>
+          <div class="flex gap-2 shrink-0"><button class="btn text-xs" @click="editExtra(w)">改名稱</button><button class="btn btn-red text-xs" @click="delExtra(w.rowId)">刪除</button></div></div>
+        <div v-if="!extraWinners.length" class="empty">尚無加碼獎紀錄</div></div></div>
+  </div>
+
+  <div v-show="pane==='screen'" class="panel space-y-4">
+    <h3 class="text-lg hint"><i class="fa-solid fa-image mr-2"></i>6. 大螢幕開幕／閉幕圖片</h3>
+    <p class="text-xs muted">貼上圖片的公開網址（https:// 開頭）。留空則顯示預設文字畫面。</p>
+    <input v-model="form.openingUrl" type="url" class="inp text-sm" placeholder="開幕圖網址 https://...">
+    <input v-model="form.closingUrl" type="url" class="inp text-sm" placeholder="閉幕圖網址 https://...">
+    <button class="btn btn-blue w-full" @click="saveImages">儲存圖片設定</button>
+    <label class="block text-xs font-bold muted pt-2">立即切換大螢幕畫面</label>
+    <div class="grid grid-cols-3 gap-2"><button v-for="m in screenModes" :key="m[0]" class="btn" :class="{on:S.settings.screenMode===m[0]}" @click="setScreen(m[0])">{{ m[1] }}</button></div>
+  </div>
+
+  <div v-show="pane==='titles'" class="panel space-y-4">
+    <h3 class="text-lg hint"><i class="fa-solid fa-heading mr-2"></i>頁面標題設定</h3>
+    <p class="text-xs muted">留空表示使用預設標題。儲存後所有裝置會同步更新。</p>
+    <div v-for="(label,k) in titleLabels" :key="k" class="space-y-1">
+      <label class="block text-xs font-bold muted">{{ label }}</label>
+      <input v-model="form.titles[k]" maxlength="60" class="inp text-sm" :placeholder="DEF_TITLES[k]"></div>
+    <div class="flex flex-col sm:flex-row gap-3">
+      <button class="btn btn-blue flex-1" @click="saveTitles(false)">儲存標題</button>
+      <button class="btn flex-1" @click="saveTitles(true)">還原預設標題</button></div>
+  </div>
+
+  <div v-show="pane==='system'" class="space-y-8">
+    <div class="panel space-y-4 !border-t-orange-400">
+      <h3 class="text-lg text-orange-300"><i class="fa-solid fa-flask mr-2"></i>7. 測試模式（獨立資料表）</h3>
+      <p class="text-xs muted">開啟後，匯入、抽獎、棄權、匯出<strong class="text-orange-300">全部改用「測試資料表」</strong>。<strong class="text-orange-300">關閉測試模式時會清除測試中獎紀錄</strong>並回到正式資料表。設定（密碼、標題、圖片）兩種模式共用。</p>
+      <div class="flex flex-col sm:flex-row gap-3">
+        <button class="btn flex-1" :class="{on:S.settings.testMode}" @click="toggleTestMode">{{ S.settings.testMode ? '🧪 測試模式：開啟中（點擊關閉並清除測試中獎紀錄）' : '測試模式：已關閉（點擊開啟）' }}</button>
+        <button class="btn btn-red flex-1" @click="clearTestData">清除測試中獎紀錄</button></div></div>
+    <div class="panel space-y-4"><h3 class="text-lg hint"><i class="fa-solid fa-key mr-2"></i>8. 修改密碼</h3>
+      <p class="text-xs muted">預設皆為 <code>1234</code>。修改後立即生效。</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div class="space-y-2"><label class="block text-xs font-bold muted">新管理員密碼（後台）</label><input v-model="form.pwAdmin" type="password" class="inp text-sm" placeholder="留空表示不修改"></div>
+        <div class="space-y-2"><label class="block text-xs font-bold muted">新主持人密碼（遙控）</label><input v-model="form.pwHost" type="password" class="inp text-sm" placeholder="留空表示不修改"></div></div>
+      <button class="btn btn-blue w-full" @click="changePasswords">儲存新密碼</button></div>
+  </div>
+</section>
+</main>
+
+<!-- 開幕／閉幕遮罩 -->
+<div v-if="showOverlay" class="overlay" :data-mode="mode" @click="enterFullscreen">
+  <img v-if="overlayUrl && imgFailed!==overlayUrl" :src="overlayUrl" alt="" @error="imgFailed=overlayUrl">
+  <div v-else class="text-center px-6">
+    <div class="text-5xl sm:text-7xl font-black tracking-widest" style="font-size:clamp(4rem,8vw,9rem)">{{ T('screen') }}</div>
+    <div class="mt-6 hint font-bold" style="font-size:clamp(1.8rem,3vw,3.6rem)">{{ mode==='opening' ? '即將開始，敬請期待' : '感謝您的參與，期待明年再相見' }}</div></div>
+  <div v-show="mode==='closing'" class="absolute bottom-4 left-4 flex gap-3" style="zoom:1.6" @click.stop>
+    <div class="qrbox"><div id="overlay-qrcode" class="w-[110px] h-[110px]"></div><div><div class="font-black text-sm">同仁手機掃碼</div><div class="text-xs font-bold">查看中獎榜</div></div></div>
+    <div class="qrbox"><div id="overlay-qrcode-p" class="w-[110px] h-[110px]"></div><div><div class="font-black text-sm">同仁手機掃碼</div><div class="text-xs font-bold">查看參加名單</div></div></div></div>
+</div>
+<div v-if="S.settings.testMode && tab==='screen'" class="fixed top-3 right-3 z-[70] px-3 py-1 bg-orange-500 text-black font-black text-sm">🧪 測試模式</div>
+
+<!-- 密碼 modal -->
+<div v-if="pw.show" class="modal">
+  <div class="panel max-w-sm w-full text-center space-y-4 !border-2 !border-white">
+    <h4 class="text-lg hint font-bold">{{ pw.title }}</h4>
+    <input ref="pwInput" v-model="pw.value" type="password" autocomplete="off" class="inp text-center text-lg" @keydown.enter="pwDone(pw.value.trim()||null)">
+    <div class="flex gap-3"><button class="btn flex-1" @click="pwDone(null)">取消</button><button class="btn btn-blue flex-1" @click="pwDone(pw.value.trim()||null)">確定</button></div></div></div>
+
+<div id="toasts"><div v-for="t in toasts" :key="t.id" class="toast" :class="t.type">{{ t.msg }}</div></div>
+</div>
+
+<script>
+const { createApp, ref, reactive, computed, watch, onMounted, nextTick } = Vue;
+
+const ROLE = new URLSearchParams(location.search).get('role') || 'home';
+const ALLOWED = ROLE === 'remote' ? ['remote', 'winners'] : ROLE === 'screen' ? ['screen']
+  : (ROLE === 'admin' || ROLE === 'home') ? null : ['participants', 'winners'];
+const PUBLIC_VIEW = !!(ALLOWED && ALLOWED.includes('participants'));
+const FAST_MS = PUBLIC_VIEW ? 10000 : 2000, SLOW_MS = PUBLIC_VIEW ? 30000 : 15000;
+const FIXED_BASE = ''; // 例如 'https://lottery.yourcompany.com'
+const DEF_TITLES = { site: '2026 尾牙極致抽獎', home: '2026 尾牙控制中心', remote: '主持人抽獎控制台', screen: '2026 尾牙幸運大抽獎', winners: '幸運中獎榮譽榜', participants: '參加人員名單', admin: '後台管理員控制台' };
+const titleLabels = { site: '網站名稱（左上角與瀏覽器分頁）', home: '大廳標題', remote: '遙控端標題', screen: '大螢幕標題（含開幕／閉幕畫面）', winners: '中獎榜標題', participants: '參加名單標題', admin: '後台標題' };
+const isTest = (w) => String(w.type || '').startsWith('測試');
+const baseType = (w) => String(w.type || '').replace('測試-', '');
+
+createApp({
+  setup() {
+    const S = reactive({ participants: [], prizes: [], winners: [], event: null, envLabel: '', settings: { openingUrl: '', closingUrl: '', screenMode: 'opening', testMode: false, titles: {} } });
+    const tab = ref('home'), online = ref(true), ablyLive = ref(false), pane = ref(sessionStorage.getItem('admin_pane') || 'import');
+    const drawType = ref('NORMAL'), prizeId = ref(''), extraTitle = ref(''), count = ref(1), drawing = ref(false);
+    const files = reactive({}), imgFailed = ref(''), zoom = ref(1);
+    const scr = reactive({ phase: 'idle', sub: '', list: [] });
+    const form = reactive({ openingUrl: '', closingUrl: '', titles: {}, pwAdmin: '', pwHost: '' });
+    const pw = reactive({ show: false, title: '', value: '', resolve: null });
+    const pwInput = ref(null), toasts = ref([]);
+    let lastEventId, lastJson = '', ablyStarted = false, formReady = false, toastN = 0;
+
+    /* ---------- 衍生資料 ---------- */
+    const mode = computed(() => S.settings.screenMode || 'opening');
+    const active = computed(() => S.winners.filter((w) => w.status !== '棄權'));
+    const official = computed(() => S.settings.testMode ? active.value : active.value.filter((w) => !isTest(w)));
+    const extraWinners = computed(() => S.winners.filter((w) => baseType(w) === '加碼獎' && w.status !== '棄權'));
+    const winnerGroups = computed(() => [
+      { title: '一般獎得獎名單', icon: 'fa-list-check', rows: official.value.filter((w) => baseType(w) === '一般獎') },
+      { title: '現場加碼獎得獎名單', icon: 'fa-fire', rows: official.value.filter((w) => baseType(w) === '加碼獎') }]);
+    const cats = computed(() => {
+      const m = new Map();
+      official.value.forEach((w) => { const s = m.get(w.participantId) || new Set(); s.add(baseType(w)); m.set(w.participantId, s); });
+      return m;
+    });
+    const remaining = (p) => p.count - active.value.filter((w) => w.prizeId === p.id).length;
+    const curPrize = computed(() => S.prizes.find((p) => p.id === prizeId.value));
+    const curRemaining = computed(() => curPrize.value ? Math.max(0, remaining(curPrize.value)) : 0);
+    const remoteList = computed(() => drawType.value === 'EXTRA'
+      ? active.value.filter((w) => w.prizeId === 'EXTRA').slice().reverse()
+      : active.value.filter((w) => w.prizeId === prizeId.value));
+    const T = (k) => (S.settings.titles || {})[k] || DEF_TITLES[k];
+    const navItems = computed(() => [['home', 'fa-house', '大廳'], ['screen', 'fa-desktop', '大螢幕'], ['remote', 'fa-mobile-screen', '遙控'],
+      ['participants', 'fa-users', '參加名單'], ['winners', 'fa-trophy', '中獎榜'], ['admin', 'fa-gears', '後台']].filter((n) => !ALLOWED || ALLOWED.includes(n[0])));
+    const homeCards = [['screen', 'fa-desktop', '1. 舞台大螢幕端', '現場大螢幕專用，即時顯示得獎卡片。'], ['remote', 'fa-mobile-screen', '2. 主持人遙控端', '手機控制面板，遠端抽獎與唱名。'], ['admin', 'fa-gears', '3. 後台管理員端', '名單上傳、獎項設定與棄權補位。']];
+    const screenModes = [['opening', '開幕圖'], ['draw', '抽獎畫面'], ['closing', '閉幕圖']];
+    const adminPanes = [['import', '📥 資料匯入'], ['stock', '🎁 獎項與棄權'], ['screen', '🖥 大螢幕畫面'], ['titles', '📝 頁面標題'], ['system', '⚙ 測試與密碼']];
+    const showOverlay = computed(() => tab.value === 'screen' && (mode.value === 'opening' || mode.value === 'closing'));
+    const overlayUrl = computed(() => mode.value === 'opening' ? S.settings.openingUrl : S.settings.closingUrl);
+
+    /* ---------- 工具 ---------- */
+    function toast(msg, type = 'ok', ms = 2400) { const id = ++toastN; toasts.value.push({ id, msg, type }); setTimeout(() => { toasts.value = toasts.value.filter((t) => t.id !== id); }, ms); }
+    async function api(path, body, role) {
+      const headers = { 'Content-Type': 'application/json' };
+      const p = sessionStorage.getItem('pw_' + (role || ''));
+      if (role && p) headers['X-Password'] = p;
+      const r = await fetch('/api/' + path, { method: body ? 'POST' : 'GET', headers, body: body ? JSON.stringify(body) : undefined });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { const e = new Error(d.error || '請求失敗'); e.status = r.status; throw e; }
+      return d;
+    }
+    const run = async (fn, okMsg) => { try { await fn(); await poll(); if (okMsg) toast(okMsg); } catch (e) { toast(e.message, 'err'); } };
+
+    /* ---------- 密碼 ---------- */
+    function askPassword(title) {
+      return new Promise((resolve) => { Object.assign(pw, { show: true, title, value: '', resolve }); nextTick(() => pwInput.value && pwInput.value.focus()); });
+    }
+    function pwDone(v) { pw.show = false; pw.resolve && pw.resolve(v); }
+    async function requireRole(role) {
+      try { await api('auth', { role }, role); return true; } catch {}
+      sessionStorage.removeItem('pw_' + role);
+      const v = await askPassword(role === 'admin' ? '請輸入管理員密碼' : '請輸入主持人密碼');
+      if (!v) return false;
+      sessionStorage.setItem('pw_' + role, v);
+      try { await api('auth', { role }, role); return true; }
+      catch { sessionStorage.removeItem('pw_' + role); toast('密碼錯誤！', 'err'); return false; }
+    }
+
+    /* ---------- 同步 ---------- */
+    function syncForms() {
+      form.openingUrl = S.settings.openingUrl || ''; form.closingUrl = S.settings.closingUrl || '';
+      form.titles = { ...(S.settings.titles || {}) };
+    }
+    async function poll() {
+      if (document.hidden && ROLE !== 'screen') return;
+      try {
+        const s = await api('state');
+        online.value = true;
+        if (s.realtime) initAbly(s.channel);
+        const j = JSON.stringify(s);
+        if (j !== lastJson) {
+          lastJson = j; Object.assign(S, s);
+          if (!formReady) { formReady = true; syncForms(); }
+        }
+        const ev = s.event;
+        if (lastEventId === undefined) lastEventId = ev ? ev.id : null;
+        else if (ev && ev.id !== lastEventId) { lastEventId = ev.id; playDraw(ev.title, ev.winners, ev.test); }
+      } catch { online.value = false; }
+    }
+    function initAbly(channel) {
+      if (ablyStarted || typeof Ably === 'undefined') return;
+      ablyStarted = true;
+      try {
+        const rt = new Ably.Realtime({ authUrl: '/api/ably-token' });
+        rt.connection.on('connected', () => { ablyLive.value = true; });
+        rt.connection.on(['disconnected', 'suspended', 'failed'], () => { ablyLive.value = false; });
+        rt.channels.get(channel || 'luckydraw-2026').subscribe('sync', () => {
+          if (PUBLIC_VIEW) setTimeout(poll, Math.random() * 3000); else { poll(); setTimeout(poll, 2300); }
+        });
+      } catch { ablyLive.value = false; }
+    }
+
+    /* ---------- 分頁 ---------- */
+    async function switchTab(t) {
+      if (ALLOWED && !ALLOWED.includes(t)) t = ALLOWED[0];
+      if (t === 'admin' && !(await requireRole('admin'))) return;
+      if (t === 'remote' && !(await requireRole('host'))) return;
+      tab.value = t;
+      if (t === 'admin') syncForms();
+    }
+    watch(pane, (p) => sessionStorage.setItem('admin_pane', p));
+
+    /* ---------- 抽獎 ---------- */
+    async function triggerDraw() {
+      const body = { type: drawType.value, count: count.value || 1 };
+      if (drawType.value === 'NORMAL') { body.prizeId = prizeId.value; if (!body.prizeId) return toast('請先選擇抽獎獎項', 'err'); }
+      else body.title = extraTitle.value;
+      drawing.value = true;
+      try {
+        const r = await api('draw', body, 'host');
+        await poll();
+        toast('已抽出 ' + (r.count || body.count) + ' 位得獎者');
+        if (navigator.vibrate) navigator.vibrate([40, 30, 40]);
+      } catch (e) {
+        if (e.status === 401) sessionStorage.removeItem('pw_host');
+        toast(e.message || '抽獎失敗', 'err');
+      }
+      drawing.value = false;
+    }
+    function playDraw(title, list, test) {
+      S.settings.screenMode = 'draw'; // 蓋掉開幕／閉幕圖
+      scr.phase = 'spin'; scr.sub = `正在抽出：${title}${test ? '（測試）' : ''}`;
+      setTimeout(() => {
+        scr.list = list; scr.phase = 'show';
+        try { confetti({ particleCount: 160, spread: 85, origin: { y: 0.6 }, colors: ['#2f6bff', '#ffffff', '#7aa2ff'] }); } catch {}
+      }, 2000);
+    }
+    // 自動選第一個還有名額的獎項
+    watch(() => S.prizes, (ps) => {
+      if (!ps.find((p) => p.id === prizeId.value)) { const f = ps.find((p) => remaining(p) > 0) || ps[0]; prizeId.value = f ? f.id : ''; }
+    });
+    const setScreen = (m) => run(async () => { await api('screen', { mode: m }, 'host'); S.settings.screenMode = m; });
+
+    /* ---------- 後台 ---------- */
+    const forfeit = async (rowId) => {
+      if (!confirm('確定該得獎者棄權，並自動補抽 1 位？')) return;
+      try { const r = await api('forfeit', { rowId }, 'admin'); await poll(); toast(r.refilled ? '已標記棄權並補抽 1 位。' : '已標記棄權，但無法補位：' + (r.note || ''), r.refilled ? 'ok' : 'err', 3500); }
+      catch (e) { toast(e.message, 'err'); }
+    };
+    const editExtra = (w) => {
+      const nm = prompt('修改加碼獎名稱', w.prizeName);
+      if (nm === null || !nm.trim()) return;
+      const all = confirm('同名稱的所有加碼獎一併修改？\n確定＝全部　取消＝只改這一位');
+      run(() => api('editwinner', { rowId: w.rowId, prizeName: nm, all }, 'admin'), '已修改');
+    };
+    const delExtra = (rowId) => confirm('確定刪除這筆加碼獎紀錄？（該同仁之後可再被抽加碼獎）') && run(() => api('deletewinner', { rowId }, 'admin'), '已刪除');
+    const saveImages = () => run(() => api('settings', { openingUrl: form.openingUrl.trim(), closingUrl: form.closingUrl.trim() }, 'admin'), '圖片設定已儲存。');
+    const saveTitles = (reset) => {
+      const titles = {}; Object.keys(DEF_TITLES).forEach((k) => { titles[k] = reset ? '' : (form.titles[k] || '').trim(); });
+      run(async () => { await api('settings', { titles }, 'admin'); if (reset) form.titles = {}; }, reset ? '已還原預設標題。' : '標題已儲存。');
+    };
+    const toggleTestMode = () => {
+      const on = !S.settings.testMode;
+      if (!confirm(on ? '開啟測試模式後，匯入與抽獎都會改用【測試資料表】，正式資料不受影響。確定開啟？' : '關閉測試模式會清除測試中獎紀錄，並回到【正式資料表】。確定嗎？')) return;
+      run(() => api('settings', { testMode: on }, 'admin'), on ? '測試模式已開啟。' : '測試模式已關閉，已回到正式資料表。');
+    };
+    const clearTestData = () => confirm('確定清除所有測試中獎紀錄？（正式資料不受影響）') && run(() => api('cleartest', {}, 'admin'), '測試中獎紀錄已清除。');
+    const factoryReset = () => {
+      const which = S.settings.testMode ? '【測試資料表】' : '【正式資料表】';
+      if (!confirm('⚠️ 確定要重置 ' + which + ' 嗎？該組的名單、獎項與中獎紀錄都會清空（另一組不受影響）。')) return;
+      run(async () => { await api('reset', {}, 'admin'); lastEventId = undefined; scr.phase = 'idle'; scr.sub = ''; }, which + '已歸零。');
+    };
+    async function changePasswords() {
+      const a = form.pwAdmin.trim(), h = form.pwHost.trim();
+      if (!a && !h) return toast('請至少填一個新密碼！', 'err');
+      if ((a && a.length < 4) || (h && h.length < 4)) return toast('密碼至少 4 碼！', 'err');
+      if (!confirm('確定要修改密碼？')) return;
+      try {
+        await api('password', { adminPassword: a || undefined, hostPassword: h || undefined }, 'admin');
+        if (a) sessionStorage.setItem('pw_admin', a); if (h) sessionStorage.setItem('pw_host', h);
+        form.pwAdmin = form.pwHost = ''; toast('密碼已更新。');
+      } catch (e) { toast(e.message, 'err'); }
+    }
+
+    /* ---------- Excel ---------- */
+    function processUpload(kind) {
+      const f = files[kind];
+      if (!f) return toast('請選擇 Excel 檔案！', 'err');
+      const target = S.settings.testMode ? '【測試資料表】' : '【正式資料表】';
+      const label = kind === 'participants' ? '同仁名單' : '獎項設定';
+      if (!confirm('將覆蓋 ' + target + ' 的' + label + '，確定嗎？')) return;
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+          const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+          const rows = kind === 'participants'
+            ? json.map((r, i) => ({ id: String(r.ID ?? i + 1), company: String(r.公司 ?? '總公司'), dept: String(r.部門 ?? '一般'), name: String(r.姓名 ?? '未命名'), english: String(r.英文 ?? '') }))
+            : json.map((r, i) => ({ id: String(r.ID ?? 'P' + (i + 1)), prizeName: String(r.獎項名稱 ?? '特別獎'), count: parseInt(r.數量) || 1 }));
+          toast('匯入中，請稍候...');
+          await api('import', { kind, rows }, 'admin'); await poll();
+          toast(`成功匯入 ${rows.length} 筆${label}到${target}！`, 'ok', 3500);
+        } catch (err) { toast('匯入失敗：' + err.message, 'err', 3500); }
+      };
+      reader.readAsArrayBuffer(f);
+    }
+    function downloadWinnersXLSX() {
+      const list = active.value;
+      if (!list.length) return toast('目前尚無中獎紀錄', 'err');
+      const wb = XLSX.utils.book_new();
+      ['一般獎', '加碼獎'].forEach((type) => {
+        const part = list.filter((w) => baseType(w) === type);
+        if (!part.length) return;
+        const data = [['獎項名稱', '公司', '部門', '姓名', '英文', '時間'], ...part.map((w) => [w.prizeName, w.company, w.dept, w.name, w.english, w.time])];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), type);
+      });
+      XLSX.writeFile(wb, S.settings.testMode ? '測試中獎名單.xlsx' : '2026尾牙中獎名單.xlsx');
+    }
+    function downloadTemplate(kind) {
+      const isP = kind === 'participants';
+      const data = isP
+        ? [['ID', '公司', '部門', '姓名', '英文'], ['101', '總公司', '資訊部', '王小明', 'Alex'], ['102', '總公司', '管理部', '李美麗', 'Mary'], ['103', '分公司', '業務部', '張大華', 'David']]
+        : [['ID', '獎項名稱', '數量'], ['P1', '特獎 - 10萬現金', 1], ['P2', '頭獎 - iPhone', 2], ['P3', '普獎 - 禮券500元', 10]];
+      const ws = XLSX.utils.aoa_to_sheet(data); ws['!cols'] = data[0].map(() => ({ wch: 18 }));
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, isP ? '參加人員' : '獎項');
+      XLSX.writeFile(wb, isP ? '參加人員名單範本.xlsx' : '獎項設定範本.xlsx');
+    }
+
+    /* ---------- 其他 ---------- */
+    const enterFullscreen = () => { if (!document.fullscreenElement && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {}); };
+    function fit() {
+      const p = parseFloat(new URLSearchParams(location.search).get('zoom'));
+      zoom.value = (p >= 1 && p <= 4) ? p : Math.max(1, Math.min(3, innerWidth / 1280, innerHeight / 760));
+    }
+    function makeQR() {
+      const base = FIXED_BASE || location.href.split('?')[0].split('#')[0];
+      const mk = (id, text, size) => { const c = document.getElementById(id); if (c && typeof QRCode !== 'undefined') { c.innerHTML = ''; new QRCode(c, { text, width: size, height: size }); } };
+      mk('host-qrcode', base + '?role=remote', 200);
+      mk('screen-qrcode', base + '?role=winners', 130); mk('screen-qrcode-p', base + '?role=participants', 130);
+      mk('overlay-qrcode', base + '?role=winners', 110); mk('overlay-qrcode-p', base + '?role=participants', 110);
+    }
+    // 遮罩是 v-if，閉幕圖出現時才建立，QR 要在那之後補產生
+    watch(showOverlay, (v) => v && nextTick(makeQR));
+    watch(() => [T('site'), S.envLabel], () => { document.title = (S.envLabel ? '[' + S.envLabel + '] ' : '') + T('site') + ' - 抽獎系統'; });
+
+    onMounted(async () => {
+      fit(); addEventListener('resize', fit);
+      makeQR();
+      await poll();
+      const map = { remote: 'remote', screen: 'screen', winners: 'winners', participants: 'participants', admin: 'admin', home: 'home', public: 'winners' };
+      switchTab(map[ROLE] || 'winners');
+      setInterval(() => { if (!ablyLive.value) poll(); }, FAST_MS);
+      setInterval(poll, SLOW_MS);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+    });
+
+    return { S, tab, online, ablyLive, pane, drawType, prizeId, extraTitle, count, drawing, files, imgFailed, zoom, scr, form, pw, pwInput, toasts,
+      mode, official, extraWinners, winnerGroups, cats, remaining, curPrize, curRemaining, remoteList, T, navItems, homeCards, screenModes, adminPanes,
+      showOverlay, overlayUrl, DEF_TITLES, titleLabels, isTest, switchTab, pwDone, triggerDraw, setScreen, forfeit, editExtra, delExtra, saveImages,
+      saveTitles, toggleTestMode, clearTestData, factoryReset, changePasswords, processUpload, downloadWinnersXLSX, downloadTemplate, enterFullscreen };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
